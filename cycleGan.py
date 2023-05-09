@@ -1,62 +1,132 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader,Dataset
+import pandas as pd
 
 # Define the generators
-class Generator(nn.Module):
+class GeneratorMeas(nn.Module):
     def __init__(self):
-        super(Generator, self).__init__()
+        super(GeneratorMeas, self).__init__()
         self.encoder = nn.Sequential(
-            nn.Linear(236, 512),
+            nn.Linear(236, 256),
             nn.ReLU(),
-            nn.Linear(512, hidden_size),
+            nn.Linear(256, 128),
             nn.ReLU(),
-            nn.Linear(hidden_size, measurement_size)
+            nn.Linear(128, 128)
         )
         self.decoder = nn.Sequential(
-            nn.Linear(measurement_size, hidden_size),
+            nn.Linear(128, 256),
             nn.ReLU(),
-            nn.Linear(hidden_size, hidden_size),
+            nn.Linear(256, 512),
             nn.ReLU(),
-            nn.Linear(hidden_size, state_size)
+            nn.Linear(512, 608)
         )
         
     def forward(self, x):
         encoded = self.encoder(x)
         decoded = self.decoder(encoded)
         return decoded
-
-# Define the discriminators
-class Discriminator(nn.Module):
+    
+class GeneratorState(nn.Module):
     def __init__(self):
-        super(Discriminator, self).__init__()
+        super(GeneratorState, self).__init__()
+        self.encoder = nn.Sequential(
+            nn.Linear(608, 512),
+            nn.ReLU(),
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Linear(256, 128)
+        )
+        self.decoder = nn.Sequential(
+            nn.Linear(128, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 236)
+        )
+        
+    def forward(self, x):
+        encoded = self.encoder(x)
+        decoded = self.decoder(encoded)
+        return decoded
+    
+
+
+# Define the discriminators for measurements
+class DiscriminatorMeas(nn.Module):
+    def __init__(self):
+        super(DiscriminatorMeas, self).__init__()
         self.net = nn.Sequential(
-            nn.Linear(measurement_size, hidden_size),
+            nn.Linear(608, 512),
             nn.ReLU(),
-            nn.Linear(hidden_size, hidden_size),
+            nn.Linear(512, 256),
             nn.ReLU(),
-            nn.Linear(hidden_size, 1),
+            nn.Linear(256, 1),
+            nn.Sigmoid()
+        )
+        
+    def forward(self, x):
+        return self.net(x)
+    
+# Define the discriminators for states
+class DiscriminatorState(nn.Module):
+    def __init__(self):
+        super(DiscriminatorState, self).__init__()
+        self.net = nn.Sequential(
+            nn.Linear(236, 128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1),
             nn.Sigmoid()
         )
         
     def forward(self, x):
         return self.net(x)
 
+# Define a custom dataset class
+class CustomDataset(Dataset):
+    def __init__(self, x_file, y_file, transform=None):
+        self.x_data = pd.read_csv(x_file)
+        self.y_data = pd.read_csv(y_file)
+
+    def __len__(self):
+        return len(self.x_data)
+
+    def __getitem__(self, idx):
+        x_sample = self.x_data.iloc[idx, :].values
+        y_sample = self.y_data.iloc[idx, :].values
+        return x_sample, y_sample
+
+
+# Create train dataset
+train_dataset = CustomDataset('states.csv', 'measures.csv')
+
+# Create train dataloader
+train_dataloader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+
+
 # Define the loss functions
 adversarial_loss = nn.BCELoss()
 cycle_consistency_loss = nn.L1Loss()
 
 # Define the generators and discriminators
-G_state2measurement = Generator()
-G_measurement2state = Generator()
-D_measurement = Discriminator()
-D_state = Discriminator()
+G_state2measurement = GeneratorMeas()
+G_measurement2state = GeneratorState()
+D_measurement = DiscriminatorMeas()
+D_state = DiscriminatorState()
+
+# configs
+learning_rate = 0.01
+num_epochs = 100
 
 # Define the optimizers
 optimizer_G = optim.Adam(list(G_state2measurement.parameters()) + list(G_measurement2state.parameters()), lr=learning_rate, betas=(0.5, 0.999))
 optimizer_D_measurement = optim.Adam(D_measurement.parameters(), lr=learning_rate, betas=(0.5, 0.999))
 optimizer_D_state = optim.Adam(D_state.parameters(), lr=learning_rate, betas=(0.5, 0.999))
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Define the training loop
 for epoch in range(num_epochs):
@@ -72,8 +142,8 @@ for epoch in range(num_epochs):
         label_real = torch.ones(real_measurement.size(0), 1).to(device)
         label_fake = torch.zeros(real_measurement.size(0), 1).to(device)
         
-        output_real_measurement = D_measurement(real_measurement)
-        output_real_state = D_state(real_state)
+        output_real_measurement = D_measurement(real_measurement).to(device)
+        output_real_state = D_state(real_state).to(device)
         loss_real_measurement = adversarial_loss(output_real_measurement, label_real)
         loss_real_state = adversarial_loss(output_real_state, label_real)
         
