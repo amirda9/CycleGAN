@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader,Dataset
 import pandas as pd
+import matplotlib.pyplot as plt
 
 # Define the generators
 class GeneratorMeas(nn.Module):
@@ -90,6 +91,14 @@ class CustomDataset(Dataset):
     def __init__(self, x_file, y_file, transform=None):
         self.x_data = pd.read_csv(x_file)
         self.y_data = pd.read_csv(y_file)
+        # to fix dtype
+        self.x_data = self.x_data.astype('float32')
+        self.y_data = self.y_data.astype('float32')
+        
+        # normalize data
+        self.x_data = (self.x_data - self.x_data.mean()) / self.x_data.std()
+        self.y_data = (self.y_data - self.y_data.mean()) / self.y_data.std()
+        
 
     def __len__(self):
         return len(self.x_data)
@@ -104,7 +113,7 @@ class CustomDataset(Dataset):
 train_dataset = CustomDataset('states.csv', 'measures.csv')
 
 # Create train dataloader
-train_dataloader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+train_dataloader = DataLoader(train_dataset, batch_size=128, shuffle=True)
 
 
 # Define the loss functions
@@ -119,7 +128,9 @@ D_state = DiscriminatorState()
 
 # configs
 learning_rate = 0.01
-num_epochs = 100
+num_epochs = 5000
+lambda_cycle = 2
+
 
 # Define the optimizers
 optimizer_G = optim.Adam(list(G_state2measurement.parameters()) + list(G_measurement2state.parameters()), lr=learning_rate, betas=(0.5, 0.999))
@@ -127,8 +138,26 @@ optimizer_D_measurement = optim.Adam(D_measurement.parameters(), lr=learning_rat
 optimizer_D_state = optim.Adam(D_state.parameters(), lr=learning_rate, betas=(0.5, 0.999))
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(device)
+
+# nets to gpu
+G_state2measurement.to(device)
+G_measurement2state.to(device)  
+
+D_measurement.to(device)
+D_state.to(device)
+
 
 # Define the training loop
+
+l_G_measurement = []
+l_G_state = []
+l_D_measurement = []
+l_D_state = []
+l_cycle = []
+l_total = []
+
+
 for epoch in range(num_epochs):
     for i, (state_data, measurement_data) in enumerate(train_dataloader):
         
@@ -142,8 +171,8 @@ for epoch in range(num_epochs):
         label_real = torch.ones(real_measurement.size(0), 1).to(device)
         label_fake = torch.zeros(real_measurement.size(0), 1).to(device)
         
-        output_real_measurement = D_measurement(real_measurement).to(device)
-        output_real_state = D_state(real_state).to(device)
+        output_real_measurement = D_measurement(real_measurement)
+        output_real_state = D_state(real_state)
         loss_real_measurement = adversarial_loss(output_real_measurement, label_real)
         loss_real_state = adversarial_loss(output_real_state, label_real)
         
@@ -195,9 +224,45 @@ for epoch in range(num_epochs):
         loss_G.backward()
         
         optimizer_G.step()
+
+        
+        # save the loss
+        l_G_measurement.append(loss_G_measurement2state)
+        l_G_state.append(loss_G_state2measurement)
+        l_D_measurement.append(loss_real_measurement + loss_fake_measurement)
+        l_D_state.append(loss_real_state + loss_fake_state)
+        l_cycle.append(loss_cycle)
+        l_total.append(loss_G)
+        
         
         # Print losses
         if i % 100 == 0:
             print('[Epoch %d/%d] [Batch %d/%d] [D loss: %.4f] [G loss: %.4f] [Cycle loss: %.4f]' %
                   (epoch, num_epochs, i, len(train_dataloader),
                    (loss_real + loss_fake).item(), loss_G.item(), loss_cycle.item()))
+
+
+
+# save the model   
+torch.save(G_state2measurement.state_dict(), 'G_state2measurement.pth')
+torch.save(G_measurement2state.state_dict(), 'G_measurement2state.pth') 
+torch.save(D_measurement.state_dict(), 'D_measurement.pth')
+torch.save(D_state.state_dict(), 'D_state.pth')
+
+
+# save the plot for six losses
+plt.figure(figsize=(10, 5))
+plt.title("Generator and Discriminator Loss During Training")
+plt.plot(l_G_measurement.to('cpu'), label="G_measurement")
+plt.plot(l_G_state.to('cpu'), label="G_state")
+plt.plot(l_D_measurement.to('cpu'), label="D_measurement")
+plt.plot(l_D_state.to('cpu'), label="D_state")
+plt.plot(l_cycle.to('cpu'), label="Cycle")
+plt.plot(l_total.to('cpu'), label="Total")
+plt.xlabel("iterations")
+plt.ylabel("Loss")
+plt.legend()
+plt.show()
+plt.savefig('loss.png')
+
+
