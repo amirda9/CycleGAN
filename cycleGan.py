@@ -17,21 +17,18 @@ class GeneratorMeas(nn.Module):
         self.encoder = nn.Sequential(
             nn.Linear(236, 256),
             nn.ReLU(),
-            # nn.Linear(256, 128),
-            # nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
             nn.Linear(256, 128)
         )
         self.decoder = nn.Sequential(
             nn.Linear(128, 256),
             nn.ReLU(),
-            # nn.Linear(256, 512),
-            # nn.ReLU(),
-            nn.Linear(256, 608)
+            nn.Linear(256, 512),
+            nn.ReLU(),
+            nn.Linear(512, 608)
         )
         
-        # weight initialization
-        self.encoder.apply(weights_init)
-        self.decoder.apply(weights_init)
         
     def forward(self, x):
         encoded = self.encoder(x)
@@ -44,21 +41,18 @@ class GeneratorState(nn.Module):
         self.encoder = nn.Sequential(
             nn.Linear(608, 512),
             nn.ReLU(),
-            # nn.Linear(512, 256),
-            # nn.ReLU(),
-            nn.Linear(512, 256)
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Linear(256, 128)
         )
         self.decoder = nn.Sequential(
-            # nn.Linear(128, 256),
-            # nn.ReLU(),
-            nn.Linear(256, 256),
+            nn.Linear(128, 200),
             nn.ReLU(),
-            nn.Linear(256, 236)
+            nn.Linear(200, 236),
+            # nn.ReLU(),
+            # nn.Linear(256, 236)
         )
         
-        # weight initialization
-        self.encoder.apply(weights_init)
-        self.decoder.apply(weights_init)
         
     def forward(self, x):
         encoded = self.encoder(x)
@@ -78,11 +72,10 @@ class DiscriminatorMeas(nn.Module):
             nn.ReLU(),
             nn.Linear(128, 64),
             nn.ReLU(),
-            nn.Linear(128, 1),
+            nn.Linear(64, 1),
             nn.Sigmoid()
         )
-        # weight initialization
-        self.net.apply(weights_init)
+
         
         
     def forward(self, x):
@@ -103,8 +96,6 @@ class DiscriminatorState(nn.Module):
             nn.Sigmoid()
         )
         
-        # weight initialization
-        self.net.apply(weights_init)
         
     def forward(self, x):
         return self.net(x)
@@ -112,9 +103,9 @@ class DiscriminatorState(nn.Module):
 # weight initialization
 def weights_init(m):
     if isinstance(m, nn.Linear):
-        nn.init.xavier_uniform_.weight.data(m.weight)
+        nn.init.xavier_uniform_(m.weight)
         m.bias.data.fill_(0.01)
-    elif isinstance(m, nn.Conv2d):
+    elif isinstance(m, nn.Conv2d): 
         nn.init.xavier_uniform_.weight.data(m.weight)
         m.bias.data.fill_(0.01)
     elif isinstance(m, nn.BatchNorm2d):
@@ -156,7 +147,7 @@ train_dataloader = DataLoader(train_dataset, batch_size=64, shuffle=True)
 
 # Define the loss functions binary cross entropy and MSE
 adversarial_loss = nn.BCELoss()
-cycle_consistency_loss = nn.L1Loss()
+cycle_consistency_loss = nn.MSELoss()
 
 # Define the generators and discriminators
 G_state2measurement = GeneratorMeas()
@@ -164,18 +155,27 @@ G_measurement2state = GeneratorState()
 D_measurement = DiscriminatorMeas()
 D_state = DiscriminatorState()
 
+G_measurement2state.apply(weights_init) 
+G_state2measurement.apply(weights_init)
+D_measurement.apply(weights_init)
+D_state.apply(weights_init)
 
 
 # configs
-learning_rate = 0.01
-num_epochs = 1000
+learning_rate = 0.001
+num_epochs = 200
 lambda_cycle = 1
 
 
 # Define the optimizers
-optimizer_G = optim.Adam(list(G_state2measurement.parameters()) + list(G_measurement2state.parameters()) + list(D_measurement.parameters()) + list(D_state.parameters()), lr=learning_rate, betas=(0.5, 0.999))
-optimizer_D_measurement = optim.Adam(D_measurement.parameters(), lr=learning_rate, betas=(0.5, 0.999))
-optimizer_D_state = optim.Adam(D_state.parameters(), lr=learning_rate, betas=(0.5, 0.999))
+# optimizer_G_measurement = optim.Adam(G_state2measurement.parameters(), lr=learning_rate, betas=(0.5, 0.999))
+# optimizer_G_state = optim.Adam(G_measurement2state.parameters(), lr=learning_rate, betas=(0.5, 0.999))
+# optimizer_D_measurement = optim.Adam(D_measurement.parameters(), lr=learning_rate, betas=(0.5, 0.999))
+# optimizer_D_state = optim.Adam(D_state.parameters(), lr=learning_rate, betas=(0.5, 0.999))
+
+optimizer_G = optim.Adam(list(G_state2measurement.parameters()) + list(G_measurement2state.parameters()), lr=learning_rate, betas=(0.5, 0.999))
+optimizer_D = optim.Adam(list(D_measurement.parameters()) + list(D_state.parameters()), lr=learning_rate, betas=(0.5, 0.999))
+optim_total = optim.Adam(list(G_state2measurement.parameters()) + list(G_measurement2state.parameters()) + list(D_measurement.parameters()) + list(D_state.parameters()), lr=learning_rate, betas=(0.5, 0.999))
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(device)
@@ -183,174 +183,158 @@ print(device)
 # nets to gpu
 G_state2measurement.to(device)
 G_measurement2state.to(device)  
-
 D_measurement.to(device)
 D_state.to(device)
 
+# lr schedulers
+lr_scheduler_G = torch.optim.lr_scheduler.LambdaLR(optimizer_G, lr_lambda=lambda epoch: 0.95 ** epoch)
+lr_scheduler_D = torch.optim.lr_scheduler.LambdaLR(optimizer_D, lr_lambda=lambda epoch: 0.95 ** epoch)
+
+
 
 # Define the training loop
-l_G_measurement = []
-l_G_state = []
-l_D_measurement = []
-l_D_state = []
-l_cycle = []
-l_total = []
+l_G = []
+l_D = []
 for epoch in range(num_epochs):
+    
     D_measurement.train()
     D_state.train()
     G_state2measurement.train()
     G_measurement2state.train()
+        
+    # lambda_cycle = 0.1 * (epoch/100)
+        
     
-    if epoch < 100:
-        lambda_cycle = 0
-    else:
-        lambda_cycle = 1
-        
-    l_G_measurement_raw = []
-    l_G_state_raw = []
-    l_D_measurement_raw = []
-    l_D_state_raw = []
-    l_cycle_raw = []
-    l_total_raw = []
+    loss_G_raw = []
+    loss_D_raw = []
     for i, (state_data, measurement_data) in enumerate(train_dataloader):
-        
-        
-        # Train the discriminators
         D_measurement.zero_grad()
         D_state.zero_grad()
+        G_state2measurement.zero_grad()
+        G_measurement2state.zero_grad()
         
-        # Train with real data
         real_measurement = measurement_data.to(device)
         real_state = state_data.to(device)
+        
         label_real = torch.ones(real_measurement.size(0), 1).to(device)
         label_fake = torch.zeros(real_measurement.size(0), 1).to(device)
         
-        output_real_measurement = D_measurement(real_measurement)
-        output_real_state = D_state(real_state)
-        loss_real_measurement = adversarial_loss(output_real_measurement, label_real)
-        loss_real_state = adversarial_loss(output_real_state, label_real)
-        
-        
-        # Train with fake data
         fake_measurement = G_state2measurement(real_state)
         fake_state = G_measurement2state(real_measurement)
         
-        output_fake_measurement = D_measurement(fake_measurement.detach())
-        output_fake_state = D_state(fake_state.detach())
-        loss_fake_measurement = adversarial_loss(output_fake_measurement, label_fake)
-        loss_fake_state = adversarial_loss(output_fake_state, label_fake)
+        
+        loss_D_measurement = adversarial_loss(D_measurement(real_measurement), label_real) + adversarial_loss(D_measurement(fake_measurement), label_fake)
+        loss_D_state = adversarial_loss(D_state(real_state), label_real) + adversarial_loss(D_state(fake_state), label_fake)
+        loss_D = loss_D_measurement + loss_D_state
+        loss_D.backward()
+        optimizer_D.step()
+        
+        label_real = torch.ones(real_measurement.size(0), 1).to(device)
+        label_fake = torch.zeros(real_measurement.size(0), 1).to(device)
+        
+        fake_measurement = G_state2measurement(real_state)
+        recov_state = G_measurement2state(fake_measurement)
+        fake_state = G_measurement2state(real_measurement)
+        recov_measurement = G_state2measurement(fake_state)
         
         
         
-        loss_D_measurement = (loss_real_measurement + loss_fake_measurement) 
-        loss_D_state = (loss_real_state + loss_fake_state)
         
-        optimizer_D_measurement.step()
-        optimizer_D_state.step()
-
+        loss_cycle = cycle_consistency_loss(recov_state, real_state) + cycle_consistency_loss(recov_measurement, real_measurement)
+        loss_identity = cycle_consistency_loss(fake_measurement, real_measurement) + cycle_consistency_loss(fake_state, real_state)
+        loss_G_measurement = adversarial_loss(D_measurement(fake_measurement), label_real)
+        loss_G_state = adversarial_loss(D_state(fake_state), label_real)
+        loss_G = loss_G_measurement + loss_G_state + lambda_cycle * loss_cycle + lambda_cycle * loss_identity
+        
+        loss_G.backward()
+        optimizer_G.step()
+        
         if epoch % 5 == 0:
-            # Print losses
-            if i % 100 == 0:
-                print('[Epoch %d/%d] [Batch %d/%d] [D loss: %.4f] [G loss: %.4f] [Cycle loss: %.4f]' %
-                    (epoch, num_epochs, i, len(train_dataloader),
-                    (loss_D_measurement + loss_D_state).item(), loss_G.item(), loss_cycle.item()))
-            # Train the generators
-            G_state2measurement.zero_grad()
-            G_measurement2state.zero_grad()
-            
-            # Forward pass
             fake_measurement = G_state2measurement(real_state)
             fake_state = G_measurement2state(real_measurement)
+            recov_measurement = G_state2measurement(fake_state)
+            recov_state = G_measurement2state(fake_measurement)
+            loss_cycle = cycle_consistency_loss(recov_state, real_state) + cycle_consistency_loss(recov_measurement, real_measurement)
+            loss_identity = cycle_consistency_loss(fake_measurement, real_measurement) + cycle_consistency_loss(fake_state, real_state)
+            loss_G_measurement = adversarial_loss(D_measurement(fake_measurement), label_real)
+            loss_G_state = adversarial_loss(D_state(fake_state), label_real)
+            loss_G = loss_G_measurement + loss_G_state + lambda_cycle * loss_cycle + lambda_cycle * loss_identity
+            loss_D_measurement = adversarial_loss(D_measurement(real_measurement), label_real) + adversarial_loss(D_measurement(fake_measurement), label_fake)
+            loss_D_state = adversarial_loss(D_state(real_state), label_real) + adversarial_loss(D_state(fake_state), label_fake)
+            loss_D = loss_D_measurement + loss_D_state
+            loss_total = loss_G + loss_D
+            loss_total.backward()
+            optim_total.step()
             
-            output_fake_measurement = D_measurement(fake_measurement)
-            output_fake_state = D_state(fake_state)
             
-            # Adversarial loss
-            loss_G_state2measurement = adversarial_loss(output_fake_measurement, label_real)
-            loss_G_measurement2state = adversarial_loss(output_fake_state, label_real)
-            
-            # Cycle consistency loss
-            reconstructed_measurement = G_state2measurement(fake_state)
-            reconstructed_state = G_measurement2state(fake_measurement)
-            
-            loss_cycle_state = cycle_consistency_loss(reconstructed_state, real_state)
-            loss_cycle_measurement = cycle_consistency_loss(reconstructed_measurement, real_measurement)
-            
-            loss_cycle = loss_cycle_state + loss_cycle_measurement
-            
-            # Total loss
-            loss_G = loss_G_state2measurement + loss_G_measurement2state + lambda_cycle * loss_cycle
-            loss_G.backward()
-            
-            optimizer_G.step()
+          
+        
+        # train measurement discriminator
+        # loss_real_measurement = adversarial_loss(D_measurement(real_measurement), label_real)
+        # loss_fake_measurement = adversarial_loss(D_measurement(fake_measurement ), label_fake)
+        # loss_D_measurement = (loss_real_measurement + loss_fake_measurement) 
+        # loss_D_measurement.backward()
+        # optimizer_D_measurement.step()
+        
+        # train state discriminator
+        # loss_real_state = adversarial_loss(D_state(real_state), label_real)
+        # loss_fake_state = adversarial_loss(D_state(fake_state), label_fake)
+        # loss_D_state = (loss_real_state + loss_fake_state)
+        # loss_D_state.backward()
+        # optimizer_D_state.step()
+        
+        # train state2measurement generator using adversarial and cycle loss
+        # loss_G_state2measurement = adversarial_loss(D_measurement(fake_measurement), label_real) + lambda_cycle * cycle_consistency_loss(recov_state, real_state)
+        # loss_G_state2measurement.backward()
+        # optimizer_G_measurement.step()
+        
+        # train measurement2state generator
+        # loss_G_measurement2state = adversarial_loss(D_state(fake_state), label_real) + lambda_cycle * cycle_consistency_loss(recov_measurement, real_measurement)
+        # loss_G_measurement2state.backward()
 
-            # save the loss
-            l_G_measurement_raw.append(loss_G_measurement2state.detach().cpu().numpy())
-            l_G_state_raw.append(loss_G_state2measurement.detach().cpu().numpy())
-            l_cycle_raw.append(loss_cycle.detach().cpu().numpy())
-            l_total_raw.append(loss_G.detach().cpu().numpy())
-        l_D_measurement_raw.append(loss_real_measurement.detach().cpu().numpy() + loss_fake_measurement.detach().cpu().numpy())
-        l_D_state_raw.append(loss_real_state.detach().cpu().numpy() + loss_fake_state.detach().cpu().numpy())
+        
+        
+        
+        # Print losses
+        if i % 100 == 0:
+            print('[Epoch %d/%d] [Batch %d/%d] [D loss: %.4f] [G loss: %.4f] [Cycle loss: %.4f]' %
+                (epoch, num_epochs, i, len(train_dataloader),
+                (loss_D_measurement + loss_D_state).item(), loss_G.item(), loss_cycle.item()))
+            
+        # save the loss
+        loss_G_raw.append(loss_G.detach().cpu().numpy())
+        loss_D_raw.append((loss_D.detach().cpu().numpy()))
+        
 
-    l_G_measurement.append(np.mean(l_G_measurement_raw))
-    l_G_state.append(np.mean(l_G_state_raw))
-    l_cycle.append(np.mean(l_cycle_raw))
-    l_total.append(np.mean(l_total_raw))
-    l_D_measurement.append(np.mean(l_D_measurement_raw))
-    l_D_state.append(np.mean(l_D_state_raw))
-    
 
+    l_G.append(np.mean(loss_G_raw))
+    l_D.append(np.mean(loss_D_raw))
+    lr_scheduler_D.step()
+    lr_scheduler_G.step()
 # make a dated folder
 now = datetime.now()
 dt_string = now.strftime("%d-%m-%Y_%H-%M-%S")
 
 
 # save the model with the date 
-torch.save(G_state2measurement.state_dict(), './results/G_state2measurement_' + dt_string + '.pth')
-torch.save(G_measurement2state.state_dict(), './results/G_measurement2state_' + dt_string + '.pth')
-torch.save(D_measurement.state_dict(), './results/D_measurement_' + dt_string + '.pth')
-torch.save(D_state.state_dict(), './results/D_state_' + dt_string + '.pth')
+# torch.save(G_state2measurement.state_dict(), './results/G_state2measurement_' + dt_string + '.pth')
+# torch.save(G_measurement2state.state_dict(), './results/G_measurement2state_' + dt_string + '.pth')
+# torch.save(D_measurement.state_dict(), './results/D_measurement_' + dt_string + '.pth')
+# torch.save(D_state.state_dict(), './results/D_state_' + dt_string + '.pth')
 
 # save the plot for six losses with the date
 plt.figure()
-plt.plot(l_G_measurement)
+plt.plot(l_G)
 plt.xlabel('Epoch')
 plt.ylabel('Loss')
-plt.title('Generator loss for measurement')
-plt.savefig('./results/G_measurement_{}.png'.format(dt_string))
+plt.title('Generator loss')
+plt.savefig('./results/G_{}.png'.format(dt_string))
 plt.close()
 plt.figure()
-plt.plot(l_G_state)
+plt.plot(l_D)
 plt.xlabel('Epoch')
 plt.ylabel('Loss')
-plt.title('Generator loss for state')   
-plt.savefig('./results/G_state_{}.png'.format(dt_string))
+plt.title('Discriminator loss')
+plt.savefig('./results/D_{}.png'.format(dt_string))
 plt.close()
-plt.figure()
-plt.plot(l_D_measurement)
-plt.xlabel('Epoch')
-plt.ylabel('Loss')
-plt.title('Discriminator loss for measurement')
-plt.savefig('./results/D_measurement_{}.png'.format(dt_string))
-plt.close()
-plt.figure()
-plt.plot(l_D_state)
-plt.xlabel('Epoch')
-plt.ylabel('Loss')
-plt.title('Discriminator loss for state')
-plt.savefig('./results/D_state_{}.png'.format(dt_string))
-plt.close()
-plt.figure()
-plt.plot(l_cycle)
-plt.xlabel('Epoch')
-plt.ylabel('Loss')
-plt.title('Cycle consistency loss')
-plt.savefig('./results/cycle_{}.png'.format(dt_string))
-plt.close()
-plt.figure()
-plt.plot(l_total)
-plt.xlabel('Epoch')
-plt.ylabel('Loss')  
-plt.title('Total loss')
-plt.savefig('./results/total_{}.png'.format(dt_string))
-plt.close()
+plt.close('all')
