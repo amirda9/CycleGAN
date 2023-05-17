@@ -13,51 +13,63 @@ from datetime import datetime
 # Define the generators
 class GeneratorMeas(nn.Module):
     def __init__(self):
+        state_dim = 236
+        hidden_dim = 16
+        meas_dim = 608
         super(GeneratorMeas, self).__init__()
-        self.encoder = nn.Sequential(
-            nn.Linear(236, 256),
-            nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Linear(256, 128)
-        )
-        self.decoder = nn.Sequential(
-            nn.Linear(128, 256),
-            nn.ReLU(),
-            nn.Linear(256, 512),
-            nn.ReLU(),
-            nn.Linear(512, 608)
+        self.net = nn.Sequential(
+            # nn convtranspose1d(in_channels, out_channels, kernel_size, stride, padding)
+            nn.ConvTranspose1d(state_dim, hidden_dim * 8, kernel_size=4, stride=2, padding=0),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose1d(hidden_dim * 8, hidden_dim * 4, kernel_size=4, stride=2, padding=1),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose1d(hidden_dim * 4, hidden_dim * 2, kernel_size=4, stride=2, padding=1),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose1d(hidden_dim * 2, hidden_dim, kernel_size=4, stride=2, padding=1),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose1d(hidden_dim, meas_dim, kernel_size=4, stride=2, padding=1),
+            nn.Tanh(),
+            nn.Flatten(),
+            nn.Linear(38912, 1024),
+            nn.ReLU(inplace=True),
+            nn.Linear(1024, 608),
+            nn.Tanh()
         )
         
         
     def forward(self, x):
-        encoded = self.encoder(x)
-        decoded = self.decoder(encoded)
-        return decoded
+        y = self.net(x.view(-1, 236, 1))
+        return y
     
 class GeneratorState(nn.Module):
     def __init__(self):
+        state_dim = 236
+        hidden_dim = 64
+        meas_dim = 608
         super(GeneratorState, self).__init__()
-        self.encoder = nn.Sequential(
-            nn.Linear(608, 512),
-            nn.ReLU(),
-            nn.Linear(512, 256),
-            nn.ReLU(),
-            nn.Linear(256, 128)
+        self.net = nn.Sequential(
+            nn.ConvTranspose1d(meas_dim, hidden_dim * 8, kernel_size=4, stride=2, padding=0),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose1d(hidden_dim * 8, hidden_dim * 4, kernel_size=4, stride=2, padding=1),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose1d(hidden_dim * 4, hidden_dim * 2, kernel_size=4, stride=2, padding=1),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose1d(hidden_dim * 2, hidden_dim, kernel_size=4, stride=2, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Tanh(),
+            nn.Flatten(),
+            nn.Linear(2048, 512),
+            nn.ReLU(inplace=True),
+            nn.Linear(512, 236),
+            nn.Tanh()
+            
         )
-        self.decoder = nn.Sequential(
-            nn.Linear(128, 200),
-            nn.ReLU(),
-            nn.Linear(200, 236),
-            # nn.ReLU(),
-            # nn.Linear(256, 236)
-        )
+
         
         
     def forward(self, x):
-        encoded = self.encoder(x)
-        decoded = self.decoder(encoded)
-        return decoded
+        y = self.net(x.view(-1, 608, 1))
+        return y
     
 
 
@@ -66,40 +78,45 @@ class DiscriminatorMeas(nn.Module):
     def __init__(self):
         super(DiscriminatorMeas, self).__init__()
         self.net = nn.Sequential(
-            nn.Linear(608, 256),
-            nn.ReLU(),
+            # nn co
+            nn.Conv1d(608, 512, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(512, 256, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Flatten(),
             nn.Linear(256, 128),
-            nn.ReLU(),
-            nn.Linear(128, 64),
-            nn.ReLU(),
-            nn.Linear(64, 1),
+            nn.ReLU(inplace=True),
+            nn.Linear(128, 1),
             nn.Sigmoid()
         )
 
         
         
     def forward(self, x):
-        return self.net(x)
+        y =  self.net(x.view(-1, 608, 1))
+        # print(y.shape)
+        return y
     
 # Define the discriminators for states
 class DiscriminatorState(nn.Module):
     def __init__(self):
         super(DiscriminatorState, self).__init__()
         self.net = nn.Sequential(
-            nn.Linear(236, 256),
-            nn.ReLU(),
-            nn.Linear(256, 128),
-            nn.ReLU(),
+            nn.Conv1d(236, 200, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(200, 128, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Flatten(),
             nn.Linear(128, 64),
-            nn.ReLU(),
+            nn.ReLU(inplace=True),
             nn.Linear(64, 1),
             nn.Sigmoid()
         )
         
         
     def forward(self, x):
-        return self.net(x)
-
+        y = self.net(x.view(-1, 236, 1))
+        return y
 # weight initialization
 def weights_init(m):
     if isinstance(m, nn.Linear):
@@ -147,7 +164,7 @@ train_dataloader = DataLoader(train_dataset, batch_size=64, shuffle=True)
 
 # Define the loss functions binary cross entropy and MSE
 adversarial_loss = nn.BCELoss()
-cycle_consistency_loss = nn.MSELoss()
+cycle_consistency_loss = nn.L1Loss()
 
 # Define the generators and discriminators
 G_state2measurement = GeneratorMeas()
@@ -163,7 +180,7 @@ D_state.apply(weights_init)
 
 # configs
 learning_rate = 0.001
-num_epochs = 200
+num_epochs = 1000
 lambda_cycle = 1
 
 
@@ -196,18 +213,18 @@ lr_scheduler_D = torch.optim.lr_scheduler.LambdaLR(optimizer_D, lr_lambda=lambda
 l_G = []
 l_D = []
 for epoch in range(num_epochs):
-    
     D_measurement.train()
     D_state.train()
     G_state2measurement.train()
     G_measurement2state.train()
         
-    # lambda_cycle = 0.1 * (epoch/100)
+    # lambda_cycle = 0.1 * (epoch//100)
         
     
     loss_G_raw = []
     loss_D_raw = []
     for i, (state_data, measurement_data) in enumerate(train_dataloader):
+        # print(state_data.shape, measurement_data.shape)
         D_measurement.zero_grad()
         D_state.zero_grad()
         G_state2measurement.zero_grad()
@@ -222,6 +239,7 @@ for epoch in range(num_epochs):
         fake_measurement = G_state2measurement(real_state)
         fake_state = G_measurement2state(real_measurement)
         
+        # print(fake_measurement.shape, fake_state.shape)
         
         loss_D_measurement = adversarial_loss(D_measurement(real_measurement), label_real) + adversarial_loss(D_measurement(fake_measurement), label_fake)
         loss_D_state = adversarial_loss(D_state(real_state), label_real) + adversarial_loss(D_state(fake_state), label_fake)
