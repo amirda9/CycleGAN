@@ -1,0 +1,363 @@
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader,Dataset
+import pandas as pd
+import matplotlib.pyplot as plt
+import pickle
+from sklearn import preprocessing
+import numpy as np
+import os
+from datetime import datetime
+import itertools
+
+# Define the generators
+class GeneratorMeas(nn.Module):
+    def __init__(self):
+        super(GeneratorMeas, self).__init__()
+        self.net = nn.Sequential(
+            nn.ConvTranspose1d(236, 512, 114, 1, 0, bias=False),
+            nn.BatchNorm1d(512),
+            nn.ReLU(True),
+
+            nn.ConvTranspose1d(512, 256, 4, 2, 1, bias=False),
+            nn.BatchNorm1d(256),
+            nn.ReLU(True),
+
+            nn.ConvTranspose1d(256, 128, 4, 2, 1, bias=False),
+            nn.BatchNorm1d(128),
+            nn.ReLU(True),
+
+            nn.ConvTranspose1d(128, 64, 4, 2, 1, bias=False),
+            nn.BatchNorm1d(64),
+            nn.ReLU(True),
+
+            nn.ConvTranspose1d(64, 1, 4, 2, 1, bias=False),
+            nn.Tanh()
+        )       
+
+        self.resnet = nn.Sequential(
+            nn.Linear(1824+236, 1024),
+            nn.ReLU(True), 
+            nn.Linear(1024, 608),
+        )
+        
+        
+    def forward(self, x):
+        y = self.net(x.view(-1, 236, 1))
+        res = torch.cat((x.view(-1, 236), y.view(-1, 1824)), 1)
+        res = self.resnet(res)
+        # print(res.shape)
+        return res
+    
+class GeneratorState(nn.Module):
+    def __init__(self):
+        super(GeneratorState, self).__init__()
+        self.net = nn.Sequential(
+            nn.ConvTranspose1d(608, 512, 114, 1, 0, bias=False),
+            nn.BatchNorm1d(512),
+            nn.ReLU(True),
+
+            nn.ConvTranspose1d(512, 256, 4, 2, 1, bias=False),
+            nn.BatchNorm1d(256),
+            nn.ReLU(True),
+
+            nn.ConvTranspose1d(256, 128, 4, 2, 1, bias=False),
+            nn.BatchNorm1d(128),
+            nn.ReLU(True),
+
+            nn.ConvTranspose1d(128, 64, 4, 2, 1, bias=False),
+            nn.BatchNorm1d(64),
+            nn.ReLU(True),
+
+            nn.ConvTranspose1d(64, 1, 4, 2, 1, bias=False),
+            nn.Tanh()
+        ) 
+        
+        self.resnet = nn.Sequential(
+            nn.Linear(1824+608, 1024),   
+            nn.ReLU(True),
+            nn.Linear(1024, 236),
+        )  
+        
+        
+    def forward(self, x):
+        y = self.net(x.view(-1, 608, 1))
+        res = torch.cat((x.view(-1, 608), y.view(-1, 1824)), 1)
+        res = self.resnet(res)
+        # print(res.shape)
+        return res
+    
+
+
+# Define the discriminators for measurements
+class DiscriminatorMeas(nn.Module):
+    def __init__(self):
+        super(DiscriminatorMeas, self).__init__()
+        self.net = nn.Sequential(
+            nn.Conv1d(608, 64, kernel_size=1, stride=2, padding=1, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size 912
+            nn.Conv1d(64, 128, kernel_size=1, stride=2, padding=1, bias=False),
+            nn.BatchNorm1d(128),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size 456
+            nn.Conv1d(128, 256, kernel_size=1,
+                      stride=2, padding=0, bias=False),
+            nn.BatchNorm1d(256),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size 228
+            nn.Conv1d(256, 512, kernel_size=1,
+                      stride=2, padding=0, bias=False),
+            nn.BatchNorm1d(512),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size 114
+            nn.Conv1d(512, 256, kernel_size=1, stride=1, padding=0, bias=False),
+            nn.Flatten(),
+            nn.Linear(256, 128),
+            nn.Linear(128, 1),
+            nn.Sigmoid()
+        )
+
+        
+        
+    def forward(self, x):
+        y =  self.net(x.view(-1, 608,1))
+        # print(y.shape)
+        return y
+    
+# Define the discriminators for states
+class DiscriminatorState(nn.Module):
+    def __init__(self):
+        super(DiscriminatorState, self).__init__()
+        self.net = nn.Sequential(
+            # input 1824
+            nn.Conv1d(236, 64, kernel_size=1, stride=2, padding=1, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size 912
+            nn.Conv1d(64, 128, kernel_size=1, stride=2, padding=1, bias=False),
+            nn.BatchNorm1d(128),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size 456
+            nn.Conv1d(128, 256, kernel_size=1,
+                      stride=2, padding=1, bias=False),
+            nn.BatchNorm1d(256),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size 228
+            nn.Conv1d(256, 512, kernel_size=1,
+                      stride=2, padding=1, bias=False),
+            nn.BatchNorm1d(512),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size 114
+            nn.Conv1d(512, 256, kernel_size=1, stride=1, padding=0, bias=False),
+            nn.Flatten(),
+            nn.Linear(512, 128),
+            nn.Linear(128, 1),
+            nn.Sigmoid()
+        )
+        
+        
+    def forward(self, x):
+        y = self.net(x.view(-1, 236,1))
+        # print(y.shape)
+        return y
+# weight initialization
+def weights_init(m):
+    if isinstance(m, nn.Linear):
+        nn.init.xavier_uniform_(m.weight)
+        m.bias.data.fill_(0.01)
+    elif isinstance(m, nn.Conv2d): 
+        nn.init.xavier_uniform_.weight.data(m.weight)
+        m.bias.data.fill_(0.01)
+    elif isinstance(m, nn.BatchNorm2d):
+        m.weight.data.fill_(1)
+        m.bias.data.zero_()
+    else:
+        pass
+
+# Define a custom dataset class
+class CustomDataset(Dataset):
+    def __init__(self, x_file, y_file, transform=None):
+        self.x_data = pd.read_csv(x_file)
+        self.y_data = pd.read_csv(y_file)
+        # to fix dtype
+        self.x_data = self.x_data.astype('float32')
+        self.y_data = self.y_data.astype('float32')
+
+        
+        self.y = self.y_data.values
+        min_max_scaler = preprocessing.MinMaxScaler()
+        self.y_scaled = min_max_scaler.fit_transform(self.y)
+        self.y_data = pd.DataFrame(self.y_scaled)
+
+    def __len__(self):
+        return len(self.x_data)
+
+    def __getitem__(self, idx):
+        x_sample = self.x_data.iloc[idx, :].values
+        y_sample = self.y_data.iloc[idx, :].values
+        return x_sample, y_sample
+
+
+# Create train dataset
+train_dataset = CustomDataset('states.csv', 'measures.csv')
+
+# Create train dataloader
+train_dataloader = DataLoader(train_dataset, batch_size=128, shuffle=True)
+
+
+# Define the loss functions binary cross entropy and MSE
+gan_loss = nn.MSELoss()
+cycle_consistency_loss = nn.L1Loss()
+identity_loss = nn.L1Loss()
+
+# Define the generators and discriminators
+G_state2measurement = GeneratorMeas()
+G_measurement2state = GeneratorState()
+D_measurement = DiscriminatorMeas()
+D_state = DiscriminatorState()
+
+G_measurement2state.apply(weights_init) 
+G_state2measurement.apply(weights_init)
+D_measurement.apply(weights_init)
+D_state.apply(weights_init)
+
+
+# configs
+learning_rate = 0.0005
+num_epochs = 100
+lambda_cycle = 2
+lambda_identity = 1
+
+
+
+optimizer_G = torch.optim.Adam(itertools.chain(G_state2measurement.parameters(), G_measurement2state.parameters()), lr=learning_rate, betas=(0.5, 0.999))
+optimizer_D_measurement = torch.optim.Adam(D_measurement.parameters(), lr=learning_rate, betas=(0.5, 0.999))
+optimizer_D_state = torch.optim.Adam(D_state.parameters(), lr=learning_rate, betas=(0.5, 0.999))
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(device)
+
+# nets to gpu
+G_state2measurement.to(device)
+G_measurement2state.to(device)  
+D_measurement.to(device)
+D_state.to(device)
+
+# # lr schedulers
+# lr_scheduler_G = torch.optim.lr_scheduler.LambdaLR(optimizer_G, lr_lambda=lambda epoch: 0.95 ** epoch)
+# lr_scheduler_D = torch.optim.lr_scheduler.LambdaLR(optimizer_D, lr_lambda=lambda epoch: 0.95 ** epoch)
+
+
+
+# Define the training loop
+l_G = []
+l_D = []
+l_cycle = []
+l_total = []
+for epoch in range(num_epochs):
+    
+        
+    
+    loss_G_raw = []
+    loss_D_raw = []
+    loss_cycle_raw = []
+    loss_total_raw = []
+    for i, (state_data, measurement_data) in enumerate(train_dataloader):
+
+        real_measurement = measurement_data.to(device)
+        real_state = state_data.to(device)
+
+        label_real = torch.ones(real_measurement.size(0), 1).to(device)
+        label_fake = torch.zeros(real_measurement.size(0), 1).to(device)
+        
+        # Train the generators
+        G_state2measurement.train()
+        G_measurement2state.train()
+        
+        optimizer_G.zero_grad()
+        
+        # identity loss
+        
+        loss_identity_state = identity_loss(G_measurement2state(real_measurement), real_state)
+        loss_identity_measurement = identity_loss(G_state2measurement(real_state), real_measurement)
+        
+        loss_identity = (loss_identity_state + loss_identity_measurement ) / 2
+        
+        # gan loss
+        fake_measurement = G_state2measurement(real_state)
+        loss_GAN_state = gan_loss(D_measurement(fake_measurement), label_real)
+        fake_state = G_measurement2state(real_measurement)
+        loss_GAN_measurement = gan_loss(D_state(fake_state), label_real)
+        loss_GAN = (loss_GAN_state + loss_GAN_measurement) / 2
+        
+        # cycle consistency loss
+        recovered_state = G_measurement2state(fake_measurement)
+        loss_cycle_state = cycle_consistency_loss(recovered_state, real_state)
+        recovered_measurement = G_state2measurement(fake_state)
+        loss_cycle_measurement = cycle_consistency_loss(recovered_measurement, real_measurement)
+        loss_cycle = (loss_cycle_state + loss_cycle_measurement) / 2
+        
+        loss_G = loss_GAN + lambda_cycle * loss_cycle + lambda_identity * loss_identity
+        loss_G.backward()
+        optimizer_G.step()
+        
+        D_measurement.train()
+        D_state.train()
+        
+        optimizer_D_measurement.zero_grad()
+        
+        loss_D_meas = (gan_loss(D_measurement(real_measurement), label_real) + gan_loss(D_measurement(fake_measurement.detach()), label_fake)) / 2
+        loss_D_meas.backward()
+        optimizer_D_measurement.step()
+        
+        optimizer_D_state.zero_grad()
+        loss_D_state = (gan_loss(D_state(real_state), label_real) + gan_loss(D_state(fake_state.detach()), label_fake)) / 2
+        loss_D_state.backward()
+        optimizer_D_state.step()
+        
+        loss_D = (loss_D_meas + loss_D_state) / 2
+        
+        
+        
+        
+
+    l_D.append(loss_D.item())
+    l_G.append(loss_G.item())
+    l_cycle.append(loss_cycle.item())
+    l_total.append(loss_G.item() + loss_D.item())
+    # lr_scheduler_D.step()
+    # lr_scheduler_G.step()
+# make a dated folder
+now = datetime.now()
+dt_string = now.strftime("%d-%m-%Y_%H-%M-%S")
+
+
+# save the plot for six losses with the date
+plt.figure()
+plt.plot(l_G)
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.title('Generator loss')
+plt.savefig('./results/G_{}.png'.format(dt_string))
+plt.close()
+plt.figure()
+plt.plot(l_D)
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.title('Discriminator loss')
+plt.savefig('./results/D_{}.png'.format(dt_string))
+plt.figure()
+plt.plot(l_cycle)
+plt.xlabel('Epoch')
+plt.ylabel('Loss')  
+plt.title('Cycle consistency loss')
+plt.savefig('./results/cycle_{}.png'.format(dt_string))
+plt.figure()
+plt.plot(l_total)
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.title('Total loss')
+plt.savefig('./results/total_{}.png'.format(dt_string))
+plt.close()
+plt.close('all')
