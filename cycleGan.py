@@ -180,7 +180,7 @@ D_state.apply(weights_init)
 
 # configs
 learning_rate = 0.001
-num_epochs = 1000
+num_epochs = 200
 lambda_cycle = 1
 
 
@@ -204,8 +204,8 @@ D_measurement.to(device)
 D_state.to(device)
 
 # lr schedulers
-lr_scheduler_G = torch.optim.lr_scheduler.LambdaLR(optimizer_G, lr_lambda=lambda epoch: 0.95 ** epoch)
-lr_scheduler_D = torch.optim.lr_scheduler.LambdaLR(optimizer_D, lr_lambda=lambda epoch: 0.95 ** epoch)
+# lr_scheduler_G = torch.optim.lr_scheduler.LambdaLR(optimizer_G, lr_lambda=lambda epoch: 0.95 ** epoch)
+# lr_scheduler_D = torch.optim.lr_scheduler.LambdaLR(optimizer_D, lr_lambda=lambda epoch: 0.95 ** epoch)
 
 
 
@@ -267,7 +267,7 @@ for epoch in range(num_epochs):
         loss_G.backward()
         optimizer_G.step()
         
-        if epoch % 5 == 0:
+        if epoch % 2 == 0:
             fake_measurement = G_state2measurement(real_state)
             fake_state = G_measurement2state(real_measurement)
             recov_measurement = G_state2measurement(fake_state)
@@ -328,7 +328,7 @@ for epoch in range(num_epochs):
     l_G.append(np.mean(loss_G_raw))
     l_D.append(np.mean(loss_D_raw))
     lr_scheduler_D.step()
-    lr_scheduler_G.step()
+    # lr_scheduler_G.step()
 # make a dated folder
 now = datetime.now()
 dt_string = now.strftime("%d-%m-%Y_%H-%M-%S")
