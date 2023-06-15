@@ -114,8 +114,8 @@ h = 0.0001;
 
 loss = []
 cost = cost_init;
-for i=1:100
-%     // zero order gradient
+for i=1:10
+%// zero order gradient
 
 meas_temp = meas_attacked;
     for k = 1:length(attack_region_buses)
@@ -179,6 +179,26 @@ mpc.bus(:,4) = meas_temp(119:236);
 
 end
 
+for i=1:length(attack_region_buses)
+    disp(meas_attacked(attack_region_buses(i)))
+    disp(meas(attack_region_buses(i)))
+    disp(meas_attacked(attack_region_buses(i)+118))
+    disp(meas(attack_region_buses(i)+118))
+end
+
+for i=1:length(attack_region_lines)
+    disp(meas_attacked(attack_region_lines(i)+236))
+    disp(meas(attack_region_lines(i)+236))
+    disp(meas_attacked(attack_region_lines(i)+422))
+    disp(meas(attack_region_lines(i)+422))
+end
 plot(loss)
+
+# append the results to a csv file
+csvwrite('meas_attacked.csv', meas_attacked)
+csvwrite('states_attacked.csv', states_attacked)
+csvwrite('meas.csv', meas)
+
+
 
 
