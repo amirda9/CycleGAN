@@ -4,252 +4,206 @@ import torch.nn as nn
 import numpy as np
 import scipy.io
 import matplotlib.pyplot as plt
+from sklearn import preprocessing
+from Arch import GeneratorState, GeneratorMeas, DiscriminatorState, DiscriminatorMeas
+import datetime
+from torch.utils.data import DataLoader,Dataset
 
 
-# Define the generators
-class GeneratorMeas(nn.Module):
-    def __init__(self):
-        super(GeneratorMeas, self).__init__()
-        self.net = nn.Sequential(
-            nn.ConvTranspose1d(236, 512, 114, 1, 0, bias=False),
-            nn.BatchNorm1d(512),
-            nn.ReLU(True),
-
-            nn.ConvTranspose1d(512, 256, 4, 2, 1, bias=False),
-            nn.BatchNorm1d(256),
-            nn.ReLU(True),
-
-            nn.ConvTranspose1d(256, 128, 4, 2, 1, bias=False),
-            nn.BatchNorm1d(128),
-            nn.ReLU(True),
-
-            nn.ConvTranspose1d(128, 64, 4, 2, 1, bias=False),
-            nn.BatchNorm1d(64),
-            nn.ReLU(True),
-
-            nn.ConvTranspose1d(64, 1, 4, 2, 1, bias=False),
-            nn.Tanh()
-        )       
-
-        self.resnet = nn.Sequential(
-            nn.Linear(1824+236, 1024),
-            nn.ReLU(True), 
-            nn.Linear(1024, 608),
-        )
-        
-        
-    def forward(self, x):
-        y = self.net(x.view(-1, 236, 1))
-        res = torch.cat((x.view(-1, 236), y.view(-1, 1824)), 1)
-        res = self.resnet(res)
-        # print(res.shape)
-        return res
-    
-class GeneratorState(nn.Module):
-    def __init__(self):
-        super(GeneratorState, self).__init__()
-        self.net = nn.Sequential(
-            nn.ConvTranspose1d(608, 512, 114, 1, 0, bias=False),
-            nn.BatchNorm1d(512),
-            nn.ReLU(True),
-
-            nn.ConvTranspose1d(512, 256, 4, 2, 1, bias=False),
-            nn.BatchNorm1d(256),
-            nn.ReLU(True),
-
-            nn.ConvTranspose1d(256, 128, 4, 2, 1, bias=False),
-            nn.BatchNorm1d(128),
-            nn.ReLU(True),
-
-            nn.ConvTranspose1d(128, 64, 4, 2, 1, bias=False),
-            nn.BatchNorm1d(64),
-            nn.ReLU(True),
-
-            nn.ConvTranspose1d(64, 1, 4, 2, 1, bias=False),
-            nn.Tanh()
-        ) 
-        
-        self.resnet = nn.Sequential(
-            nn.Linear(1824+608, 1024),   
-            nn.ReLU(True),
-            nn.Linear(1024, 236),
-        )  
-        
-        
-    def forward(self, x):
-        y = self.net(x.view(-1, 608, 1))
-        res = torch.cat((x.view(-1, 608), y.view(-1, 1824)), 1)
-        res = self.resnet(res)
-        # print(res.shape)
-        return res
-    
-# Define the discriminators for measurements
-class DiscriminatorMeas(nn.Module):
-    def __init__(self):
-        super(DiscriminatorMeas, self).__init__()
-        self.net = nn.Sequential(
-            nn.Conv1d(608, 64, kernel_size=1, stride=2, padding=1, bias=False),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size 912
-            nn.Conv1d(64, 128, kernel_size=1, stride=2, padding=1, bias=False),
-            nn.BatchNorm1d(128),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size 456
-            nn.Conv1d(128, 256, kernel_size=1,
-                      stride=2, padding=0, bias=False),
-            nn.BatchNorm1d(256),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size 228
-            nn.Conv1d(256, 512, kernel_size=1,
-                      stride=2, padding=0, bias=False),
-            nn.BatchNorm1d(512),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size 114
-            nn.Conv1d(512, 256, kernel_size=1, stride=1, padding=0, bias=False),
-            nn.Flatten(),
-        )
-        
-        self.resnet = nn.Sequential(
-            nn.Linear(256+608, 256),
-            nn.Linear(256, 1),
-            nn.Sigmoid()
-        )
-
-        
-        
-    def forward(self, x):
-        y =  self.net(x.view(-1, 608,1))
-        res = torch.cat((x.view(-1, 608), y.view(-1, 256)), 1)
-        res = self.resnet(res)
-        # print(y.shape)
-        return res
-    
-# Define the discriminators for states
-class DiscriminatorState(nn.Module):
-    def __init__(self):
-        super(DiscriminatorState, self).__init__()
-        self.net = nn.Sequential(
-            # input 1824
-            nn.Conv1d(236, 64, kernel_size=1, stride=2, padding=1, bias=False),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size 912
-            nn.Conv1d(64, 128, kernel_size=1, stride=2, padding=1, bias=False),
-            nn.BatchNorm1d(128),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size 456
-            nn.Conv1d(128, 256, kernel_size=1,
-                      stride=2, padding=1, bias=False),
-            nn.BatchNorm1d(256),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size 228
-            nn.Conv1d(256, 512, kernel_size=1,
-                      stride=2, padding=1, bias=False),
-            nn.BatchNorm1d(512),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size 114
-            nn.Conv1d(512, 256, kernel_size=1, stride=1, padding=0, bias=False),
-            nn.Flatten(),
-        )
-        self.resnet = nn.Sequential(
-            nn.Linear(512+236, 256),
-            nn.Linear(256, 1),
-            nn.Sigmoid()
-        )
-        
-        
-    def forward(self, x):
-        y = self.net(x.view(-1, 236,1))
-        res = torch.cat((x.view(-1, 236), y.view(-1, 512)), 1)
-        res = self.resnet(res)
-        # print(y.shape)
-        return res
 
 
 # loading the cycleGAN model
 G_meas2state = GeneratorState()
-G_meas2state.load_state_dict(torch.load('./recovery/G_measurement2state_07-06-2023_13-17-43.pth'))
+G_meas2state.load_state_dict(torch.load('./G_measurement2state_21-07-2023_19-40-53.pth', map_location=torch.device('cpu')))
 G_state2meas = GeneratorMeas()
-G_state2meas.load_state_dict(torch.load('./recovery/G_state2measurement_07-06-2023_13-17-43.pth'))
+G_state2meas.load_state_dict(torch.load('./G_state2measurement_21-07-2023_19-40-53.pth', map_location=torch.device('cpu')))
 D_state = DiscriminatorState()
-D_state.load_state_dict(torch.load('./recovery/D_state_07-06-2023_13-17-43.pth'))
+D_state.load_state_dict(torch.load('./D_state_21-07-2023_19-40-53.pth', map_location=torch.device('cpu')))
 D_meas = DiscriminatorMeas()
-D_meas.load_state_dict(torch.load('./recovery/D_measurement_07-06-2023_13-17-43.pth'))
+D_meas.load_state_dict(torch.load('./D_measurement_21-07-2023_19-40-53.pth', map_location=torch.device('cpu')))
 
 
-state_data = scipy.io.loadmat('./attackData/st.mat')
-state = state_data['state']
+# state_data = scipy.io.loadmat('./attackData/st2.mat')
+# state_mat = state_data['state']
 
-meas_data = scipy.io.loadmat('./attackData/meas.mat')   
-meas = meas_data['meas']
+# meas_data = scipy.io.loadmat('./attackData/meas2.mat')   
+# meas_mat = meas_data['meas']
 
-meas_attacked_data = scipy.io.loadmat('./attackData/meas_attacked.mat') 
-meas_attacked = meas_attacked_data['meas_attacked']
-
-st_data = scipy.io.loadmat('./attackData/st.mat')
-st = st_data['state']
+# meas_attacked_data = scipy.io.loadmat('./attackData/meas_attacked2.mat') 
+# meas_attacked_mat = meas_attacked_data['meas_attacked']
 
 
+min_max_scaler = preprocessing.MinMaxScaler()
+y_data = pd.read_csv('measures.csv')
+y = y_data.values
+y_scaled = min_max_scaler.fit_transform(y)
 
-# importing the data
-# states = pd.read_csv('./attackData/st.csv')
-# meas = pd.read_csv('./attackData/meas.csv')
-# meas_attacked = pd.read_csv('./attackData/meas_attacked.csv')
+# #########################################
 
 
-# meas = np.array(meas.columns.values.reshape(-1,608))
-# meas_attacked = np.array(meas_attacked.columns.values.reshape(-1,608))
+# Define a custom dataset class
+class CustomDataset(Dataset):
+    def __init__(self, x_file, y_file, transform=None):
+        self.x_data = pd.read_csv(x_file)
+        self.y_data = pd.read_csv(y_file)
+        # to fix dtype
+        self.x_data = self.x_data.astype('float32')
+        self.y_data = self.y_data.astype('float32')
+
+        
+        self.y = self.y_data.values
+        self.y_scaled = min_max_scaler.fit_transform(self.y)
+        self.y_data = pd.DataFrame(self.y_scaled)
+
+    def __len__(self):
+        return len(self.x_data)
+
+    def __getitem__(self, idx):
+        x_sample = self.x_data.iloc[idx, :].values
+        y_sample = self.y_data.iloc[idx, :].values
+        return x_sample, y_sample
+
+
+# Create train dataset
+train_dataset = CustomDataset('states.csv', 'measures.csv')
+
+# Create train dataloader
+train_dataloader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+
+
+
+test_dataset = CustomDataset('X_test.csv', 'Y_test.csv')
+test_dataloader = DataLoader(test_dataset, batch_size=64, shuffle=True)
+
+
+# #########################################
+
+# meas_attacked_mat = min_max_scaler.transform(meas_attacked_mat)
+# meas_mat = min_max_scaler.transform(meas_mat)
+
+
+
 
 loss_criterion = nn.L1Loss()
 
-# loss_init = loss_criterion(meas_attacked, meas)
-# print columns
-print(meas_attacked)
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+G_state2meas.to(device)
+G_meas2state.to(device)  
+D_meas.to(device)
+D_state.to(device)
+
+# D_state.eval()
+# D_meas.eval()
+# G_meas2state.eval()
+# G_state2meas.eval()
+
+rand = np.random.randint(0, 2000)
+st,meas = train_dataset.__getitem__(rand)
 
 
+meas_mat = meas 
+state_mat = st
+meas_attacked_mat = np.array(meas_mat)
+
+
+# bus_idx = [4,5,11,12,13,14,40,50,70,53,64,23,64,86,92,99,103,106]
+# lines_idx = [3,10,11,12,14,16,17,30,40,50,60,53,13,65,87,90,92,95,99]
 bus_idx = [4,5,11,12,13]
-lines_idx = [3,10,11,12,14,16]
-meas_attacked_tensor = torch.tensor(meas_attacked, dtype=torch.float32)
-meas_gt_tensor = torch.tensor(meas, dtype=torch.float32)
-meas_temp = meas_attacked_tensor
-# optimizer = torch.optim.Adam([meas_temp], lr=0.01)
-print(meas_attacked_tensor)
+lines_idx = [3,10,11,12,14]
+
+for idx in bus_idx:
+    meas_attacked_mat[idx] *= np.random.uniform(0.7, 1.3)
+    meas_attacked_mat[idx+118] *= np.random.uniform(0.7, 1.3)
+    
+for idx in lines_idx:
+    meas_attacked_mat[idx+236] *= np.random.uniform(0.7, 1.3)
+    meas_attacked_mat[idx+422] *= np.random.uniform(0.7, 1.3)
+
+
+meas_temp = torch.tensor(meas_attacked_mat, dtype=torch.float32)
+meas_gt_tensor = torch.tensor(meas_mat, dtype=torch.float32)
+st = torch.tensor(state_mat, dtype=torch.float32)
+
+
+
 loss_gt = []
 loss_cycle = []
-for i in range(500):
-    # optimizer.zero_grad()
-    meas_temp.requires_grad = True
-    recon_state = G_meas2state(meas_temp)
-    recon_meas = G_state2meas(recon_state)
-    # loss_temp = loss_criterion(recon_meas, meas_temp.reshape(-1,608)) + loss_criterion(recon_state, st.reshape(-1,236))
-    loss_temp = loss_criterion(recon_meas, meas_temp.reshape(-1,608)) - D_meas(recon_meas) + loss_criterion(recon_state, st.reshape(-1,236)) - D_state(recon_state)
-    loss_temp.backward()
-    # optimizer.step()
-    with torch.no_grad():
-        meas_temp_arr = np.array(meas_temp.detach().numpy())
-        grad_arr = np.array(meas_temp.grad.detach().numpy())
-        meas_temp_arr = meas_temp_arr - 0.01*grad_arr 
-        # for idx in bus_idx:
-        #     meas_temp_arr[0,idx] = meas_temp_arr[0,idx] - 0.3*grad_arr[0,idx]
-        #     meas_temp_arr[0,idx+118] = meas_temp_arr[0,idx+118] - 0.3*grad_arr[0,idx+118]
-        # for idx in lines_idx:
-        #     meas_temp_arr[0,idx+236] = meas_temp_arr[0,idx+236] - 0.3*grad_arr[0,idx+236]
-        #     meas_temp_arr[0,idx+422] = meas_temp_arr[0,idx+422] - 0.3*grad_arr[0,idx+422]
-        meas_temp = torch.tensor(meas_temp_arr, dtype=torch.float32)
-        loss_gt.append(loss_criterion(meas_gt_tensor, meas_temp.reshape(-1,608)))
-        loss_cycle.append(loss_criterion(recon_meas, meas_temp.reshape(-1,608)))
-        # print(loss_criterion(meas_gt_tensor, meas_temp.reshape(-1,608)),loss_criterion(recon_meas, meas_temp.reshape(-1,608)))
-        # pass
-     
-plt.figure()   
-plt.plot(loss_gt)
-plt.title('L1 loss of GT and attacked measurement')
-plt.savefig('./results/loss_gt.png')
-plt.figure()
-plt.plot(loss_cycle)
-plt.title('L1 loss of cycle consistency')
-plt.savefig('./results/loss_cycle.png')
+
+# to device for meas and state
+meas_temp = meas_temp.to(device)
+meas_gt_tensor = meas_gt_tensor.to(device)
+st = st.to(device)
+
+
+
+recon_state_attacked = G_meas2state(meas_temp)
+recon_meas_attacked = G_state2meas(recon_state_attacked)
+
+recon_state_healthy = G_meas2state(meas_gt_tensor)
+recon_meas_healthy = G_state2meas(recon_state_healthy)
+
+cycle_state_attacked = G_meas2state(recon_meas_attacked)
+cycle_state_healthy = G_meas2state(recon_meas_healthy)
+
+print('difference between gt state and reconstructed state attacked: ', loss_criterion(st.reshape(-1,236), recon_state_attacked.reshape(-1,236)).item())
+print('difference between gt state and reconstructed state healthy: ', loss_criterion(st.reshape(-1,236), recon_state_healthy.reshape(-1,236)).item())
+
+print('difference between gt meas and reconstructed meas attacked: ', loss_criterion(meas_gt_tensor.reshape(-1,608), recon_meas_attacked.reshape(-1,608)).item())
+print('difference between gt meas and reconstructed meas healthy: ', loss_criterion(meas_gt_tensor.reshape(-1,608), recon_meas_healthy.reshape(-1,608)).item())
+print('difference between gt meas and attacked meas', loss_criterion(meas_gt_tensor.reshape(-1,608), meas_temp.reshape(-1,608)).item())
+
+
+print('gt for cycle product for state attacked:', loss_criterion(st.reshape(-1,236), cycle_state_attacked.reshape(-1,236)).item())
+print('gt for cycle product for state healthy:', loss_criterion(st.reshape(-1,236), cycle_state_healthy.reshape(-1,236)).item())
+
+print('cycle for state attacked:', loss_criterion(recon_state_attacked.reshape(-1,236), cycle_state_attacked.reshape(-1,236)).item())
+print('cycle for state healthy:', loss_criterion(recon_state_healthy.reshape(-1,236), cycle_state_healthy.reshape(-1,236)).item())
+    
+
+loss_main = []
+loss_meas = []
+loss_st = []
+
+alpha = 0.000005
+# for i in range(50):
+#     meas_temp.requires_grad = True
+#     corr_state = G_meas2state(meas_temp)
+#     corr_meas = G_state2meas(corr_state)
+#     cycle_state = G_meas2state(corr_meas)
+#     cycle_meas = G_state2meas(cycle_state)
+#     # print('st:' ,loss_criterion(st.reshape(-1,236), corr_state.reshape(-1,236)).item())
+#     # print('meas:',loss_criterion(meas_gt_tensor.reshape(-1,608), corr_meas.reshape(-1,608)).item())
+#     # print('cycle_state', loss_criterion(corr_state.reshape(-1,236), cycle_state.reshape(-1,236)).item())
+    
+#     loss = loss_criterion(corr_state.reshape(-1,236), cycle_state.reshape(-1,236)) + loss_criterion(meas_temp.reshape(-1,608), corr_meas.reshape(-1,608))
+#     loss.backward()
+#     with torch.no_grad():
+#         alpha *= 0.99
+#         grad_arr = np.array(meas_temp.grad.detach().cpu())
+#         meas_temp_arr = np.array(meas_temp.detach().cpu())
+#         meas_temp_arr -= alpha * grad_arr
+#         meas_temp = torch.tensor(meas_temp_arr, dtype=torch.float32)
+#         loss_main.append(loss.item())
+#         loss_meas.append(loss_criterion(meas_gt_tensor.reshape(-1,608), meas_temp.reshape(-1,608)).item())
+#         loss_st.append(loss_criterion(st.reshape(-1,236), corr_state.reshape(-1,236)).item())
+        
+#         if i % 20 == 0:
+#             print('epoch: ', i)
+        
+#         # early stopping
+#         if np.linalg.norm(grad_arr) < 0.01:
+#             break
+
+# plt.figure()
+# plt.plot(loss_main)
+# plt.title('loss_main')
+# plt.figure()
+# plt.plot(loss_meas)
+# plt.title('loss_meas')
+# plt.figure()
+# plt.plot(loss_st)
+# plt.title('loss_st')
+
+
 # plt.show()
-plt.close()
-    
-    
-    
