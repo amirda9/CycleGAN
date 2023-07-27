@@ -8,6 +8,7 @@ from sklearn import preprocessing
 from Arch import GeneratorState, GeneratorMeas, DiscriminatorState, DiscriminatorMeas
 import datetime
 from torch.utils.data import DataLoader,Dataset
+import pickle
 
 
 
@@ -52,6 +53,7 @@ class CustomDataset(Dataset):
 
         
         self.y = self.y_data.values
+        min_max_scaler = preprocessing.MinMaxScaler()
         self.y_scaled = min_max_scaler.fit_transform(self.y)
         self.y_data = pd.DataFrame(self.y_scaled)
 
@@ -98,43 +100,52 @@ D_state.to(device)
 # G_meas2state.eval()
 # G_state2meas.eval()
 
-rand = np.random.randint(0, 2000)
-st,meas = train_dataset.__getitem__(rand)
+# rand = np.random.randint(0, 2000)
+# st,meas = train_dataset.__getitem__(rand)
 
 
-meas_mat = meas 
-state_mat = st
-meas_attacked_mat = np.array(meas_mat)
+# meas_mat = meas 
+# state_mat = st
+# meas_attacked_mat = np.array(meas_mat)
 
 
 # bus_idx = [4,5,11,12,13,14,40,50,70,53,64,23,64,86,92,99,103,106]
 # lines_idx = [3,10,11,12,14,16,17,30,40,50,60,53,13,65,87,90,92,95,99]
-bus_idx = [4,5,11,12,13]
-lines_idx = [3,10,11,12,14]
+# bus_idx = [4,5,11,12,13]
+# lines_idx = [3,10,11,12,14]
 
-for idx in bus_idx:
-    meas_attacked_mat[idx] *= np.random.uniform(0.7, 1.3)
-    meas_attacked_mat[idx+118] *= np.random.uniform(0.7, 1.3)
+# for idx in bus_idx:
+#     meas_attacked_mat[idx] *= np.random.uniform(0.7, 1.3)
+#     meas_attacked_mat[idx+118] *= np.random.uniform(0.7, 1.3)
     
-for idx in lines_idx:
-    meas_attacked_mat[idx+236] *= np.random.uniform(0.7, 1.3)
-    meas_attacked_mat[idx+422] *= np.random.uniform(0.7, 1.3)
+# for idx in lines_idx:
+#     meas_attacked_mat[idx+236] *= np.random.uniform(0.7, 1.3)
+#     meas_attacked_mat[idx+422] *= np.random.uniform(0.7, 1.3)
 
 
-meas_temp = torch.tensor(meas_attacked_mat, dtype=torch.float32)
-meas_gt_tensor = torch.tensor(meas_mat, dtype=torch.float32)
-st = torch.tensor(state_mat, dtype=torch.float32)
+# meas_temp = torch.tensor(meas_attacked_mat, dtype=torch.float32)
+# meas_gt_tensor = torch.tensor(meas_mat, dtype=torch.float32)
+# st = torch.tensor(state_mat, dtype=torch.float32)
 
 
 
-loss_gt = []
-loss_cycle = []
+# loss_gt = []
+# loss_cycle = []
 
-# to device for meas and state
+
+
+idx = 5
+# read from pickle
+with open('./AttackedPickle/meas_attacked_'+str(idx)+'.pkl', 'rb') as f:
+    meas_temp = pickle.load(f)
+with open('./AttackedPickle/meas_'+str(idx)+'.pkl', 'rb') as f:
+    meas_gt_tensor = pickle.load(f)
+with open('./AttackedPickle/st_'+str(idx)+'.pkl', 'rb') as f:
+    st = pickle.load(f)
+    
 meas_temp = meas_temp.to(device)
 meas_gt_tensor = meas_gt_tensor.to(device)
 st = st.to(device)
-
 
 
 recon_state_attacked = G_meas2state(meas_temp)
@@ -162,48 +173,42 @@ print('cycle for state healthy:', loss_criterion(recon_state_healthy.reshape(-1,
     
 
 loss_main = []
-loss_meas = []
 loss_st = []
 
-alpha = 0.000005
-# for i in range(50):
-#     meas_temp.requires_grad = True
-#     corr_state = G_meas2state(meas_temp)
-#     corr_meas = G_state2meas(corr_state)
-#     cycle_state = G_meas2state(corr_meas)
-#     cycle_meas = G_state2meas(cycle_state)
-#     # print('st:' ,loss_criterion(st.reshape(-1,236), corr_state.reshape(-1,236)).item())
-#     # print('meas:',loss_criterion(meas_gt_tensor.reshape(-1,608), corr_meas.reshape(-1,608)).item())
-#     # print('cycle_state', loss_criterion(corr_state.reshape(-1,236), cycle_state.reshape(-1,236)).item())
-    
-#     loss = loss_criterion(corr_state.reshape(-1,236), cycle_state.reshape(-1,236)) + loss_criterion(meas_temp.reshape(-1,608), corr_meas.reshape(-1,608))
-#     loss.backward()
-#     with torch.no_grad():
-#         alpha *= 0.99
-#         grad_arr = np.array(meas_temp.grad.detach().cpu())
-#         meas_temp_arr = np.array(meas_temp.detach().cpu())
-#         meas_temp_arr -= alpha * grad_arr
-#         meas_temp = torch.tensor(meas_temp_arr, dtype=torch.float32)
-#         loss_main.append(loss.item())
-#         loss_meas.append(loss_criterion(meas_gt_tensor.reshape(-1,608), meas_temp.reshape(-1,608)).item())
-#         loss_st.append(loss_criterion(st.reshape(-1,236), corr_state.reshape(-1,236)).item())
-        
-#         if i % 20 == 0:
-#             print('epoch: ', i)
-        
-#         # early stopping
-#         if np.linalg.norm(grad_arr) < 0.01:
-#             break
-
-# plt.figure()
-# plt.plot(loss_main)
-# plt.title('loss_main')
-# plt.figure()
-# plt.plot(loss_meas)
-# plt.title('loss_meas')
-# plt.figure()
-# plt.plot(loss_st)
-# plt.title('loss_st')
+alpha = 0.01
 
 
-# plt.show()
+state_attacked = G_meas2state(meas_temp).detach().cpu()
+corr_state = state_attacked.detach().clone()
+for i in range(2000):
+    corr_state.requires_grad = True
+    corr_meas = G_state2meas(corr_state)
+    cycle_state = G_meas2state(corr_meas)
+    loss = loss_criterion(corr_state.reshape(-1,236), cycle_state.reshape(-1,236))
+    loss.backward()
+    with torch.no_grad():
+        # alpha *= 0.999
+        grad_arr = np.array(corr_state.grad.detach().cpu())
+        corr_state_arr = np.array(corr_state.detach().cpu())
+        corr_state_arr -= alpha * grad_arr
+        corr_state = torch.tensor(corr_state_arr, dtype=torch.float32)
+        loss_main.append(loss.item())
+        loss_st.append(loss_criterion(st.reshape(-1,236), corr_state.reshape(-1,236)).item())
+        print(loss_criterion(corr_state.reshape(-1,236), cycle_state.reshape(-1,236)).item())
+        if i % 20 == 0:
+            print('epoch: ', i)
+        # early stopping
+        if np.linalg.norm(grad_arr) < 0.01:
+            break
+
+plt.figure()
+plt.plot(loss_main)
+plt.title('loss_main')
+plt.figure()
+plt.plot(loss_st)
+plt.title('loss_st')
+# print a line with a point
+plt.axhline(y=loss_criterion(st.reshape(-1,236), recon_state_attacked.reshape(-1,236)).item(), color='r', linestyle='-')
+plt.axhline(y= loss_criterion(st.reshape(-1,236), recon_state_healthy.reshape(-1,236)).item(), color='g', markersize=3)
+
+plt.show()
